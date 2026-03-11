@@ -18,16 +18,37 @@ mkdir -p "${MACOS}" "${RESOURCES}"
 # Collect all Swift source files
 SWIFT_FILES=$(find "${SRC_DIR}" -name "*.swift" -type f)
 
-echo "Compiling..."
+# Build universal binary (arm64 + x86_64)
+echo "Compiling (arm64)..."
 swiftc \
-    -o "${MACOS}/${APP_NAME}" \
+    -o "${MACOS}/${APP_NAME}-arm64" \
     -target arm64-apple-macos14.0 \
     -sdk "$(xcrun --show-sdk-path)" \
     -framework SwiftUI \
     -framework AppKit \
     -framework Foundation \
     -parse-as-library \
+    -O \
     ${SWIFT_FILES}
+
+echo "Compiling (x86_64)..."
+swiftc \
+    -o "${MACOS}/${APP_NAME}-x86_64" \
+    -target x86_64-apple-macos14.0 \
+    -sdk "$(xcrun --show-sdk-path)" \
+    -framework SwiftUI \
+    -framework AppKit \
+    -framework Foundation \
+    -parse-as-library \
+    -O \
+    ${SWIFT_FILES}
+
+echo "Creating universal binary..."
+lipo -create \
+    "${MACOS}/${APP_NAME}-arm64" \
+    "${MACOS}/${APP_NAME}-x86_64" \
+    -output "${MACOS}/${APP_NAME}"
+rm "${MACOS}/${APP_NAME}-arm64" "${MACOS}/${APP_NAME}-x86_64"
 
 # Copy Info.plist
 cp "${SRC_DIR}/Info.plist" "${CONTENTS}/Info.plist"
@@ -44,8 +65,24 @@ codesign --force --sign - --entitlements "${ENTITLEMENTS}" "${APP_BUNDLE}"
 
 echo ""
 echo "Build complete: ${APP_BUNDLE}"
-echo ""
-echo "To install, run:"
-echo "  cp -r ${APP_BUNDLE} /Applications/"
-echo ""
-echo "Then open the app and click 'Set as Default Browser' in settings."
+
+# Create DMG if --dmg flag is passed
+if [[ "${1:-}" == "--dmg" ]]; then
+    DMG_PATH="${BUILD_DIR}/${APP_NAME}.dmg"
+    DMG_STAGING="${BUILD_DIR}/dmg-staging"
+    echo "Creating DMG..."
+
+    mkdir -p "${DMG_STAGING}"
+    cp -r "${APP_BUNDLE}" "${DMG_STAGING}/"
+    ln -s /Applications "${DMG_STAGING}/Applications"
+
+    hdiutil create \
+        -volname "${APP_NAME}" \
+        -srcfolder "${DMG_STAGING}" \
+        -ov \
+        -format UDZO \
+        "${DMG_PATH}"
+
+    rm -rf "${DMG_STAGING}"
+    echo "DMG created: ${DMG_PATH}"
+fi
